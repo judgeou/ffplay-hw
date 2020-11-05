@@ -25,6 +25,10 @@
   <ItemGroup>
     <None Include=".gitignore" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="cmdutils.h" />
+    <ClInclude Include="config.h" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
