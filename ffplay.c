@@ -2158,6 +2158,15 @@ static int video_thread(void *arg)
 {
     VideoState *is = arg;
     AVFrame *frame = av_frame_alloc();
+    AVFrame* hwFrame = av_frame_alloc();
+    struct SwsContext* swsctx = sws_getContext(
+        is->width, is->height, AV_PIX_FMT_NV12,
+        is->width, is->height, AV_PIX_FMT_YUV420P,
+        0, 0, 0, 0);
+    uint8_t* dstData[8];
+    int dstLinesize[8];
+    av_image_alloc(dstData, dstLinesize, is->width, is->height, AV_PIX_FMT_YUV420P, 1);
+
     double pts;
     double duration;
     int ret;
@@ -2174,15 +2183,23 @@ static int video_thread(void *arg)
     int last_vfilter_idx = 0;
 #endif
 
-    if (!frame)
+    if (!hwFrame)
         return AVERROR(ENOMEM);
 
     for (;;) {
-        ret = get_video_frame(is, frame);
+        ret = get_video_frame(is, hwFrame);
         if (ret < 0)
             goto the_end;
         if (!ret)
             continue;
+
+        av_hwframe_transfer_data(frame, hwFrame, 0);
+        av_frame_copy_props(frame, hwFrame);
+        frame->width = hwFrame->width;
+        frame->height = hwFrame->height;
+        frame->format = AV_PIX_FMT_YUV420P;
+
+        sws_scale(swsctx, frame->data, frame->linesize, 0, frame->height, dstData, dstLinesize);
 
 #if CONFIG_AVFILTER
         if (   last_w != frame->width
@@ -2258,6 +2275,8 @@ static int video_thread(void *arg)
     avfilter_graph_free(&graph);
 #endif
     av_frame_free(&frame);
+    av_frame_free(&hwFrame);
+    sws_freeContext(swsctx);
     return 0;
 }
 
@@ -2624,7 +2643,29 @@ static int stream_component_open(VideoState *is, int stream_index)
     switch(avctx->codec_type){
         case AVMEDIA_TYPE_AUDIO   : is->last_audio_stream    = stream_index; forced_codec_name =    audio_codec_name; break;
         case AVMEDIA_TYPE_SUBTITLE: is->last_subtitle_stream = stream_index; forced_codec_name = subtitle_codec_name; break;
-        case AVMEDIA_TYPE_VIDEO   : is->last_video_stream    = stream_index; forced_codec_name =    video_codec_name; break;
+        case AVMEDIA_TYPE_VIDEO   : 
+        {
+            //for (int i = 0; i < 100; i++) {
+            //    AVCodecHWConfig * config = avcodec_get_hw_config(codec, i);
+            //    if (config) {
+            //        if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
+            //            config->device_type == AV_HWDEVICE_TYPE_DXVA2) {
+            //            hw_pix_fmt = config->pix_fmt;
+            //            break;
+            //        }
+            //    }
+            //}
+
+            AVBufferRef* hw_device_ctx;
+            av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_DXVA2, NULL, NULL, 0);
+            avctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
+
+            is->width = avctx->width;
+            is->height = avctx->height;
+            is->last_video_stream = stream_index;
+            forced_codec_name = video_codec_name;
+            break;
+        }
     }
     if (forced_codec_name)
         codec = avcodec_find_decoder_by_name(forced_codec_name);
