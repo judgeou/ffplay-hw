@@ -2159,13 +2159,12 @@ static int video_thread(void *arg)
     VideoState *is = arg;
     AVFrame *frame = av_frame_alloc();
     AVFrame* hwFrame = av_frame_alloc();
+    AVFrame* softFrame = av_frame_alloc();
     struct SwsContext* swsctx = sws_getContext(
         is->width, is->height, AV_PIX_FMT_NV12,
         is->width, is->height, AV_PIX_FMT_YUV420P,
         0, 0, 0, 0);
-    uint8_t* dstData[8];
-    int dstLinesize[8];
-    av_image_alloc(dstData, dstLinesize, is->width, is->height, AV_PIX_FMT_YUV420P, 1);
+    av_image_alloc(frame->data, frame->linesize, is->width, is->height, AV_PIX_FMT_YUV420P, 1);
 
     double pts;
     double duration;
@@ -2193,13 +2192,13 @@ static int video_thread(void *arg)
         if (!ret)
             continue;
 
-        av_hwframe_transfer_data(frame, hwFrame, 0);
+        av_hwframe_transfer_data(softFrame, hwFrame, 0);
         av_frame_copy_props(frame, hwFrame);
         frame->width = hwFrame->width;
         frame->height = hwFrame->height;
         frame->format = AV_PIX_FMT_YUV420P;
 
-        sws_scale(swsctx, frame->data, frame->linesize, 0, frame->height, dstData, dstLinesize);
+        sws_scale(swsctx, softFrame->data, softFrame->linesize, 0, hwFrame->height, frame->data, frame->linesize);
 
 #if CONFIG_AVFILTER
         if (   last_w != frame->width
